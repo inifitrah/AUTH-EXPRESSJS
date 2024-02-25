@@ -1,43 +1,44 @@
 const express = require("express");
+const jwt = require("jsonwebtoken");
+const { deleteAccountService } = require("./user.service");
 const User = require("../models/user.model");
-const { body, validationResult, query } = require("express-validator");
 const router = express.Router();
+const SECRET_KEY = process.env.SECRET_KEY;
 
-//ambil semua user
-router.get("/", async (req, res) => {
-  res.send(await User.find({}));
-});
-
-//cek user by email
-router.post(
-  "/",
-  body("email", "email tidak valid").isEmail(),
-  async (req, res) => {
-    const result = validationResult(req);
-    if (result.isEmpty()) {
-      console.log("bisa");
-      const email = req.body.email;
-      const getUserByEmail = await User.findOne({ email });
-      getUserByEmail
-        ? res.send(getUserByEmail)
-        : res.send("user tidak ditemukan");
+const verifyToken = (req, res, next) => {
+  try {
+    const authHeader = req?.headers["authorization"];
+    if (!authHeader) {
+      return res.send("Token required");
     }
+    const token = authHeader.split(" ")[1];
+    req.userLogin = jwt.verify(token, SECRET_KEY);
+    next();
+  } catch (error) {
+    console.error(error.message);
   }
-);
+};
 
-router.get("/:id", async (req, res) => {
-  const userId = req.params.id;
-  const getUserById = await User.findOne({ _id: userId })
-
- res.send(await getUserById)
+//delete user/account
+router.delete("/", verifyToken, async (req, res) => {
+  try {
+    const userLogin = req.userLogin;
+    const userInput = req.body;
+    const { status, message } = await deleteAccountService(
+      userLogin,
+      userInput
+    );
+    res.status(status).send({
+      message,
+    });
+  } catch (error) {
+    console.error(error.message);
+  }
 });
 
-//hapus user
-router.delete("/:id", async (req, res) => {
-  const id = req.params.id;
-  await User.findOneAndDelete({ _id: id }).then(() => {
-    res.send(`user dengan id ${id} berhasil dihapus`);
-  });
+router.delete("/all", async (req, res) => {
+  await User.deleteMany();
+  res.send("All users deletedsuccessfully!");
 });
 
 module.exports = router;

@@ -1,0 +1,10 @@
+# The database URL to use for the application. This
+DATABASE_URL=
+
+# secret key jwt
+SECRET_KEY=
+
+# mail trah
+HOST = 
+YOUR_KEY = 
+YOUR_LOGIN = 

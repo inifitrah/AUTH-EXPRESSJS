@@ -6,8 +6,9 @@ const userSchema = new mongoose.Schema({
   username: String,
   created_at: Date,
   updated_at: Date,
+  verificationCode: String,
 });
 
 const User = new mongoose.model("User", userSchema);
 
-module.exports = User
+module.exports = User;
