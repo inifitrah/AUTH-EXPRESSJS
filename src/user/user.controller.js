@@ -3,7 +3,7 @@ const jwt = require("jsonwebtoken");
 const { deleteAccountService } = require("./user.service");
 const User = require("../models/user.model");
 const router = express.Router();
-const SECRET_KEY = process.env.SECRET_KEY;
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const verifyToken = (req, res, next) => {
   try {
@@ -12,7 +12,7 @@ const verifyToken = (req, res, next) => {
       return res.send("Token required");
     }
     const token = authHeader.split(" ")[1];
-    req.userLogin = jwt.verify(token, SECRET_KEY);
+    req.userLogin = jwt.verify(token, JWT_SECRET);
     next();
   } catch (error) {
     console.error(error.message);
@@ -36,6 +36,7 @@ router.delete("/", verifyToken, async (req, res) => {
   }
 });
 
+//if you want to deleted all user
 router.delete("/all", async (req, res) => {
   await User.deleteMany();
   res.send("All users deletedsuccessfully!");

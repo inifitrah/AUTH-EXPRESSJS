@@ -1,208 +1,195 @@
 const User = require("../models/user.model");
 const jwt = require("jsonwebtoken");
-const SECRET_KEY = process.env.SECRET_KEY;
 const bcrypt = require("bcrypt");
 const mail = require("../utils/mail");
-const TWENTY_FOUR_HOURS = 86400;
 
 async function authLoginService(errors, userInput) {
-  if (!errors.isEmpty()) {
-    return {
-      status: 401,
-      message: "Email invalid",
-    };
-  }
+  if (!errors.isEmpty()) throw "Invalid Email";
   try {
-    //cek email
-    const user = await User.findOne({ email: userInput.email });
-    if (!user) {
-      return {
-        status: 401,
-        message: "User not found or password incorrect",
-      };
-    }
-    // cek password
-    const isMatch = await bcrypt.compare(userInput.password, user.password);
-    if (!isMatch) {
-      return {
-        status: 401,
-        message: "Password incorrect",
-      };
-    }
-    // generate token
-    const { _id, email } = user;
-    const token = jwt.sign({ userId: _id, email }, SECRET_KEY, {
-      expiresIn: TWENTY_FOUR_HOURS,
-    });
-    return {
-      status: 200,
-      message: "Authenticated successfully",
-      token,
-      data: user,
-    };
+    // if true return the response
+    return await User.findOne({ email: userInput.email })
+      //cek email
+      .then(async (user) => {
+        if (!user) {
+          throw "User not found";
+        }
+        if (!user.verified) {
+          throw "Please verify your account";
+        }
+        // cek password
+        await bcrypt
+          .compare(userInput?.password, user?.password)
+          .then((result) => {
+            if (!result) {
+              throw Error("Password incorrect");
+            }
+          })
+          .catch((error) => {
+            throw Error(error);
+            0;
+          });
+        //generate token
+        const token = jwt.sign(
+          { userId: user._id, email: user.email },
+          process.env.JWT_SECRET,
+          {
+            expiresIn: process.env.JWT_EXPIRES,
+          }
+        );
+        return { status: 200, token, message: "Authenticated successfully" };
+      })
+      .catch((error) => {
+        throw Error(error);
+      });
   } catch (error) {
     throw new Error(error);
   }
 }
 
 async function authSignupService(errors, userInput) {
-  if (!errors.isEmpty()) {
-    return {
-      status: 401,
-      message: "Email invalid",
-    };
-  }
+  if (!errors.isEmpty()) throw "Invalid Email";
   try {
-    //cek email
-    const user = await User.findOne({ email: userInput.email });
-    if (!user) {
-      return {
-        status: 401,
-        message: "User not found",
-      };
-    }
-    // cek password
-    const isMatch = await bcrypt.compare(userInput.password, user.password);
-    if (!isMatch) {
-      return {
-        status: 401,
-        message: "Password incorrect",
-      };
-    }
-    // generate token
-    const { _id, email } = user;
-    const token = jwt.sign({ userId: _id, email }, SECRET_KEY, {
-      expiresIn: TWENTY_FOUR_HOURS,
+    return await User.findOne({ email: userInput.email }).then(async (user) => {
+      if (user && user.verified) {
+        throw "User allready! Please login.";
+      } else if (user && !user.verified) {
+        await generateCodeAndSendEmailService(user.email);
+      }
+
+      if (!user) {
+        await bcrypt.hash(userInput.password, 10).then(async (hash) => {
+          new User({
+            email: userInput.email,
+            password: hash,
+            verified: false,
+          })
+            .save()
+            .then(async (user) => {
+              return await generateCodeAndSendEmailService(user.email);
+            });
+        });
+        return {
+          status: 200,
+          message: `You must verify your email, Check your email for a verification code. `,
+        };
+      }
     });
+  } catch (error) {
+    throw new Error(error);
+  }
+}
+
+async function verifyAccountService(errors, userInput) {
+  if (!errors.isEmpty()) throw "Invalid Email";
+  try {
+    const verifyCode = await verifyCodeService(userInput.email, userInput.code); //true or false
+    if (!verifyCode) throw "Wrong code";
+    const user = await User.findOneAndUpdate(
+      { email: userInput.email },
+      { verified: true, verificationCode: null },
+      { new: true }
+    );
+    user.save();
+    const token = jwt.sign(
+      { userId: user._id, email: user.email },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: process.env.JWT_EXPIRES,
+      }
+    );
     return {
+      id: user._id,
+      email: user.email,
       status: 200,
-      message: "Authenticated successfully",
+      message: "Account Verified",
       token,
-      data: user,
     };
+  } catch (error) {
+    throw new Error(error);
+  }
+}
+
+async function verifyCodeService(email, verificationCode) {
+  try {
+    //return true or false
+    return await User.findOne({
+      email,
+    }).then(async (user) => {
+      if (user === null) throw "User not found";
+      return await bcrypt
+        .compare(verificationCode.toString(), user.verificationCode)
+        .then((result) => {
+          if (!result) throw "Invalid Code";
+          return result;
+        });
+    });
   } catch (error) {
     throw new Error(error);
   }
 }
 
 async function forgotPasswordService(errors, userInput) {
-  if (!errors.isEmpty()) {
-    return {
-      status: 401,
-      message: "Email invalid",
-    };
-  }
+  if (!errors.isEmpty()) throw "Invalid Email";
   try {
-    //generate verification code
-    const verificationCode = (
-      Math.floor(Math.random() * 900000) + 100000
-    ).toString();
-    console.log(verificationCode);
-    //cek email and update verification code
-    const hashedVerificationCode = await bcrypt.hash(verificationCode, 5);
-    const user = await User.findOneAndUpdate(
-      { email: userInput.email },
-      { verificationCode: hashedVerificationCode },
-      { new: true }
-    );
-    if (!user) {
-      return {
-        status: 401,
-        message: "User not found!",
-      };
-    }
-    await user.save();
-    const message = {
-      from: {
-        name: "TRAH TECH",
-        address: "trah@gmail.com",
-      },
-      to: {
-        name: user.email,
-        address: user.email,
-      },
-      subject: "Verifikasi email",
-      text: `Kode verifikasi anda ${verificationCode}`,
-    };
-
-    // send mail using nodemailer
-    const sendMail = await mail(message);
-    return {
-      status: 200,
-      message: sendMail,
-    };
-  } catch (error) {
-    throw new Error(error);
-  }
-}
-
-async function verifyCodeService(errors, userInput) {
-  if (!errors.isEmpty()) {
-    return {
-      status: 401,
-      message: "Email invalid",
-    };
-  }
-  try {
-    const user = await User.findOne({
-      email: userInput.email,
-    });
-    if (!user) {
-      return {
-        status: 401,
-        message: "User not found",
-      };
-    }
-    // Verify codes sent by users
-    const verifyCode = await bcrypt.compare(
-      userInput.code.toString(),
-      user.verificationCode
-    );
-    if (!verifyCode) {
-      return {
-        status: 403,
-        message: "Invalid code",
-      };
-    }
-    return {
-      status: 200,
-      message: "Success verification code",
-    };
+    return await generateCodeAndSendEmailService(userInput.email);
   } catch (error) {
     throw new Error(error);
   }
 }
 
 async function resetPasswordService(errors, userInput) {
-  if (!errors.isEmpty()) {
-    return {
-      status: 401,
-      message: "Email invalid",
-    };
-  }
+  if (!errors.isEmpty()) throw "Invalid Email";
   try {
-    const hashedPassword = await bcrypt.hash(userInput.newPassword, 10);
-    const user = await User.findOneAndUpdate(
-      { email: userInput.email },
-      {
-        password: hashedPassword,
-        updated_at: new Date(),
-        verificationCode: null,
-      },
-      { new: true }
-    );
-    if (!user) {
+    return await bcrypt.hash(userInput.newPassword, 10).then(async (hash) => {
+      await User.findOneAndUpdate(
+        { email: userInput.email },
+        {
+          password: hash,
+          updatedAt: new Date(),
+          verificationCode: null,
+        },
+        { new: true }
+      ).then((user) => {
+        if (!user) throw "User not found!.";
+        user.save();
+      });
       return {
-        status: 401,
-        message: "User not found",
+        status: 200,
+        message:
+          "The password has been successfully reset. Please log in with your new password.",
       };
-    }
-    await user.save();
-    return {
-      status: 200,
-      message:
-        "The password has been successfully reset. Please log in with your new password.",
-    };
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+}
+
+async function generateCodeAndSendEmailService(email) {
+  try {
+    //generate verification code
+    const verificationCode = (
+      Math.floor(Math.random() * 900000) + 100000
+    ).toString();
+    //hash verificationCode
+    return await bcrypt.hash(verificationCode, 5).then(async (hash) => {
+      //update data
+      await User.findOneAndUpdate(
+        { email },
+        { verificationCode: hash },
+        { new: true }
+      ).then(async (user) => {
+        if (!user) throw Error("User not found");
+        return user.save().then(async (user) => {
+          await mail(user.email, verificationCode);
+        });
+      });
+
+      return {
+        status: 200,
+        message:
+          "Verification Code has been sent to your Email. Please check it out!",
+      };
+    });
   } catch (error) {
     throw new Error(error);
   }
@@ -214,4 +201,5 @@ module.exports = {
   forgotPasswordService,
   verifyCodeService,
   resetPasswordService,
+  verifyAccountService,
 };

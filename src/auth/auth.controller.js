@@ -7,23 +7,24 @@ const {
   forgotPasswordService,
   verifyCodeService,
   resetPasswordService,
+  verifyAccountService,
 } = require("./auth.service");
 
 router.post("/login", [body("email").trim().isEmail()], async (req, res) => {
   try {
     const errors = validationResult(req);
     const userInput = req.body;
-    const { status, message, token, data } = await authLoginService(
+    const { status, message, token } = await authLoginService(
       errors,
       userInput
     );
     res.status(status).send({
       message,
       token,
-      data,
     });
   } catch (error) {
-    res.status(401).send({
+    res.status(401).json({
+      status: "FAILED",
       message: error.message,
     });
   }
@@ -33,14 +34,9 @@ router.post("/signup", [body("email").trim().isEmail()], async (req, res) => {
   try {
     const errors = validationResult(req);
     const userInput = req.body;
-    const { status, message, token, data } = await authSignupService(
-      errors,
-      userInput
-    );
+    const { status, message } = await authSignupService(errors, userInput);
     res.status(status).send({
       message,
-      token,
-      data,
     });
   } catch (error) {
     res.status(401).send({
@@ -48,6 +44,30 @@ router.post("/signup", [body("email").trim().isEmail()], async (req, res) => {
     });
   }
 });
+
+router.post(
+  "/verify-account",
+  [body("email").trim().isEmail()],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      const userInput = req.body;
+      const { status, message, token, ...data } = await verifyAccountService(
+        errors,
+        userInput
+      );
+      res.status(status).send({
+        message,
+        token,
+        ...data,
+      });
+    } catch (error) {
+      res.send({
+        message: error.message,
+      });
+    }
+  }
+);
 
 router.put(
   "/forgot-password",
@@ -67,20 +87,17 @@ router.put(
   }
 );
 
-router.put(
-  "/verify-code",
-  [body("email").trim().isEmail()],
-  async (req, res) => {
-    const errors = validationResult(req);
-    const userInput = req.body;
-    try {
-      const { status, message } = await verifyCodeService(errors, userInput);
-      res.status(status).send({ message });
-    } catch (error) {
-      console.error(error.message);
+router.put("/verify-code", async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    const verifyCode = await verifyCodeService(email, code);
+    if (verifyCode) {
+      res.status(200).send({ message: "Verification code successfully!." });
     }
+  } catch (error) {
+    res.status(401).send();
   }
-);
+});
 
 router.put(
   "/reset-password",

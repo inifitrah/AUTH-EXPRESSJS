@@ -1,6 +1,6 @@
 const nodemailer = require("nodemailer");
 
-async function mail(message) {
+async function mail(email, verificationCode) {
   const port = 587;
   const host = process.env.HOST;
   const YOUR_LOGIN = process.env.YOUR_LOGIN;
@@ -16,11 +16,18 @@ async function mail(message) {
   });
 
   try {
-    await transporter.sendMail({
-      ...message,
+    return await transporter.sendMail({
+      from: {
+        name: "TRAH TECH",
+        address: "trah@gmail.com",
+      },
+      to: {
+        name: email,
+        address: email,
+      },
+      subject: "Verifikasi email",
+      text: `Kode verifikasi anda ${verificationCode}`,
     });
-
-    return "Email has been sent";
   } catch (error) {
     throw new Error(error);
   }

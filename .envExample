@@ -2,7 +2,7 @@
 DATABASE_URL=
 
 # secret key jwt
-SECRET_KEY=
+JWT_SECRET=
 
 # mail trah
 HOST = 

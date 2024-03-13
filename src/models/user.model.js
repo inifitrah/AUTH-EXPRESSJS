@@ -4,8 +4,9 @@ const userSchema = new mongoose.Schema({
   email: String,
   password: String,
   username: String,
-  created_at: Date,
-  updated_at: Date,
+  createdAt: Date,
+  updatedAt: Date,
+  verified: Boolean,
   verificationCode: String,
 });
 
