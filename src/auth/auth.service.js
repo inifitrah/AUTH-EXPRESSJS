@@ -2,204 +2,206 @@ const User = require("../models/user.model");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const mail = require("../utils/mail");
+const Otp = require("../models/otp.model");
 
-async function authLoginService(errors, userInput) {
-  if (!errors.isEmpty()) throw "Invalid Email";
+async function refreshTokenService(cookies) {
   try {
-    // if true return the response
-    return await User.findOne({ email: userInput.email })
-      //cek email
-      .then(async (user) => {
-        if (!user) {
-          throw "User not found";
-        }
-        if (!user.verified) {
-          throw "Please verify your account";
-        }
-        // cek password
-        await bcrypt
-          .compare(userInput?.password, user?.password)
-          .then((result) => {
-            if (!result) {
-              throw Error("Password incorrect");
-            }
-          })
-          .catch((error) => {
-            throw Error(error);
-            0;
-          });
-        //generate token
-        const token = jwt.sign(
-          { userId: user._id, email: user.email },
-          process.env.JWT_SECRET,
-          {
-            expiresIn: process.env.JWT_EXPIRES,
-          }
-        );
-        return { status: 200, token, message: "Authenticated successfully" };
-      })
-      .catch((error) => {
-        throw Error(error);
-      });
+    const { refreshToken } = cookies;
+    if (!refreshToken) throw new Error("Refresh token is required");
+    const {
+      user: { email },
+    } = jwt.verify(refreshToken, process.env.JWT_REFRESH_TOKEN_SECRET);
+    const userDB = await User.findOne({ email });
+    if (refreshToken !== userDB.refresh_token)
+      throw new Error("Invalid refresh token");
+    const user = {
+      userId: userDB._id,
+      email: userDB.email,
+      profileUrl: userDB.profile_url,
+    };
+    const accessToken = jwt.sign(
+      { user },
+      process.env.JWT_ACCESS_TOKEN_SECRET,
+      {
+        expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRES,
+      }
+    );
+    return { accessToken };
   } catch (error) {
     throw new Error(error);
   }
 }
 
-async function authSignupService(errors, userInput) {
-  if (!errors.isEmpty()) throw "Invalid Email";
+async function loginService({ email, password }) {
   try {
-    return await User.findOne({ email: userInput.email }).then(async (user) => {
-      if (user && user.verified) {
-        throw "User allready! Please login.";
-      } else if (user && !user.verified) {
-        await generateCodeAndSendEmailService(user.email);
+    const isUserExist = await User.findOne({ email });
+    if (!isUserExist) {
+      throw new Error("User not found, please register!");
+    }
+    const checkPassword = await bcrypt.compare(password, isUserExist.password);
+    if (!checkPassword) {
+      throw new Error("Wrong password!");
+    }
+    const user = {
+      userId: isUserExist._id,
+      email: isUserExist.email,
+    };
+    const accessToken = jwt.sign(
+      { user },
+      process.env.JWT_ACCESS_TOKEN_SECRET,
+      {
+        expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRES,
       }
-
-      if (!user) {
-        await bcrypt.hash(userInput.password, 10).then(async (hash) => {
-          new User({
-            email: userInput.email,
-            password: hash,
-            verified: false,
-          })
-            .save()
-            .then(async (user) => {
-              return await generateCodeAndSendEmailService(user.email);
-            });
-        });
-        return {
-          status: 200,
-          message: `You must verify your email, Check your email for a verification code. `,
-        };
+    );
+    const refreshToken = jwt.sign(
+      { user },
+      process.env.JWT_REFRESH_TOKEN_SECRET,
+      {
+        expiresIn: process.env.JWT_REFRESH_TOKEN_EXPIRES,
       }
-    });
-  } catch (error) {
-    throw new Error(error);
-  }
-}
-
-async function verifyAccountService(errors, userInput) {
-  if (!errors.isEmpty()) throw "Invalid Email";
-  try {
-    const verifyCode = await verifyCodeService(userInput.email, userInput.code); //true or false
-    if (!verifyCode) throw "Wrong code";
-    const user = await User.findOneAndUpdate(
-      { email: userInput.email },
-      { verified: true, verificationCode: null },
+    );
+    //add refresh token to db
+    await User.updateOne(
+      { email: isUserExist.email },
+      { refresh_token: refreshToken },
       { new: true }
     );
-    user.save();
-    const token = jwt.sign(
-      { userId: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: process.env.JWT_EXPIRES,
-      }
-    );
     return {
-      id: user._id,
-      email: user.email,
       status: 200,
-      message: "Account Verified",
-      token,
+      refreshToken,
+      accessToken,
+      msg: "Logged is successful!",
     };
   } catch (error) {
     throw new Error(error);
   }
 }
 
-async function verifyCodeService(email, verificationCode) {
+async function signupService({ email, password, token }) {
   try {
-    //return true or false
-    return await User.findOne({
+    if (!token) throw new Error("Token required");
+    const {
+      user: { email: emailToken },
+    } = jwt.verify(token, process.env.JWT_ACCESS_TOKEN_SECRET);
+    if (email !== emailToken) throw new Error("Wrong token");
+    const isUserExist = await User.findOne({ email });
+    if (isUserExist) throw new Error("User allready! Please login.");
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({
       email,
-    }).then(async (user) => {
-      if (user === null) throw "User not found";
-      return await bcrypt
-        .compare(verificationCode.toString(), user.verificationCode)
-        .then((result) => {
-          if (!result) throw "Invalid Code";
-          return result;
-        });
+      password: hashedPassword,
     });
+    await newUser.save();
+    return {
+      status: 200,
+      msg: `Register successfull.`,
+    };
   } catch (error) {
     throw new Error(error);
   }
 }
 
-async function forgotPasswordService(errors, userInput) {
-  if (!errors.isEmpty()) throw "Invalid Email";
+async function resetPasswordService({ email, newPassword, token }) {
   try {
-    return await generateCodeAndSendEmailService(userInput.email);
+    if (!token) throw new Error("Token required");
+    const {
+      user: { email: emailToken },
+    } = jwt.verify(token, process.env.JWT_ACCESS_TOKEN_SECRET);
+    if (email !== emailToken) throw new Error("Wrong token");
+    const existingUser = await User.findOne({ email });
+    if (!existingUser) throw new Error("User not found!");
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await User.findOneAndUpdate(
+      { email },
+      {
+        password: hashedPassword,
+        updatedAt: new Date(),
+      },
+      { new: true }
+    );
+    return {
+      status: 200,
+      msg: "The password has been successfully reset. Please log in with your new password.",
+    };
   } catch (error) {
     throw new Error(error);
   }
 }
 
-async function resetPasswordService(errors, userInput) {
-  if (!errors.isEmpty()) throw "Invalid Email";
+async function generateOtpAndSendEmailService({ email }) {
   try {
-    return await bcrypt.hash(userInput.newPassword, 10).then(async (hash) => {
-      await User.findOneAndUpdate(
-        { email: userInput.email },
-        {
-          password: hash,
-          updatedAt: new Date(),
-          verificationCode: null,
-        },
-        { new: true }
-      ).then((user) => {
-        if (!user) throw "User not found!.";
-        user.save();
-      });
-      return {
-        status: 200,
-        message:
-          "The password has been successfully reset. Please log in with your new password.",
-      };
+    const existingOtp = await Otp.findOne({ user_email: email });
+    const currentTime = new Date();
+
+    if (existingOtp) {
+      const timeDiff = (currentTime - existingOtp.createdAt) / 1000;
+      if (timeDiff < 60) {
+        throw new Error(
+          `Harap tunggu selama ${Math.round(
+            60 - timeDiff
+          )} detik untuk meminta OTP baru`
+        );
+      }
+      await Otp.deleteOne({ user_email: email });
+    }
+    // Generate OTP baru
+    const otp = (Math.floor(Math.random() * 900000) + 100000).toString();
+    console.log({ email });
+    console.log({ otp });
+    const hashedOtp = await bcrypt.hash(otp, 10);
+    // Simpan OTP baru
+    const newOtp = new Otp({
+      user_email: email,
+      otp: hashedOtp,
     });
+    await newOtp.save();
+
+    // Kirim OTP via email
+    await mail(email, `Kode verifikasi anda ${otp}`);
+    return {
+      status: 200,
+      msg: "Verification Code has been sent to your Email. Please check it out!",
+    };
   } catch (error) {
     throw new Error(error);
   }
 }
 
-async function generateCodeAndSendEmailService(email) {
+async function verifyOtpService({ otp, email }) {
   try {
-    //generate verification code
-    const verificationCode = (
-      Math.floor(Math.random() * 900000) + 100000
-    ).toString();
-    //hash verificationCode
-    return await bcrypt.hash(verificationCode, 5).then(async (hash) => {
-      //update data
-      await User.findOneAndUpdate(
-        { email },
-        { verificationCode: hash },
-        { new: true }
-      ).then(async (user) => {
-        if (!user) throw Error("User not found");
-        return user.save().then(async (user) => {
-          await mail(user.email, verificationCode);
-        });
-      });
+    const existingOtp = await Otp.findOne({ user_email: email });
+    if (!existingOtp) throw new Error("Otp expire");
+    const verifyOtp = await bcrypt.compare(otp.toString(), existingOtp.otp);
+    if (!verifyOtp) throw new Error("Wrong otp!");
 
-      return {
-        status: 200,
-        message:
-          "Verification Code has been sent to your Email. Please check it out!",
-      };
-    });
+    //generate token
+    const user = {
+      email,
+    };
+    const accessToken = jwt.sign(
+      { user },
+      process.env.JWT_ACCESS_TOKEN_SECRET,
+      {
+        expiresIn: "5m",
+      }
+    );
+    // send token
+    return {
+      msg: "Verify otp success",
+      status: 200,
+      accessToken,
+    };
   } catch (error) {
     throw new Error(error);
   }
 }
 
 module.exports = {
-  authLoginService,
-  authSignupService,
-  forgotPasswordService,
-  verifyCodeService,
+  loginService,
+  verifyOtpService,
+  signupService,
   resetPasswordService,
-  verifyAccountService,
+  generateOtpAndSendEmailService,
+  refreshTokenService,
 };

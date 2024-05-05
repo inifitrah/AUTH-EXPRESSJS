@@ -1,1 +1,1 @@
-Malas buat dokumentasinya, pahami saja kodenya aowkaowko
+malas buat readmenya aowkaowko.

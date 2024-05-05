@@ -1,117 +1,127 @@
-const express = require("express");
-const router = express.Router();
-const { body, validationResult } = require("express-validator");
 const {
-  authSignupService,
-  authLoginService,
-  forgotPasswordService,
-  verifyCodeService,
+  loginService,
+  refreshTokenService,
+  signupService,
+  generateOtpAndSendEmailService,
   resetPasswordService,
-  verifyAccountService,
+  verifyOtpService,
 } = require("./auth.service");
+const User = require("../models/user.model");
 
-router.post("/login", [body("email").trim().isEmail()], async (req, res) => {
+//refresh token
+exports.refreshToken = async (req, res) => {
   try {
-    const errors = validationResult(req);
+    const cookies = req?.cookies;
+    const refreshToken = await refreshTokenService(cookies);
+    const { accessToken } = refreshToken;
+    return res.status(200).json({
+      is_success: true,
+      token: accessToken,
+    });
+  } catch (error) {
+    res.status(400).json({ is_success: false, msg: error.message });
+  }
+};
+
+exports.login = async (req, res) => {
+  try {
     const userInput = req.body;
-    const { status, message, token } = await authLoginService(
-      errors,
-      userInput
+    const login = await loginService(userInput);
+    const { refreshToken, accessToken, status, msg } = login;
+    res
+      .cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        maxAge: 60 * 60 * 24 * 7 * 1000, // 7d
+      })
+      .json({
+        is_login: true,
+        msg,
+        token: accessToken,
+      })
+      .status(status);
+  } catch (error) {
+    res.status(400).json({
+      is_login: false,
+      msg: error.message,
+    });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOneAndUpdate(
+      { email },
+      {
+        refresh_token: null,
+      },
+      {
+        new: true,
+      }
     );
-    res.status(status).send({
-      message,
-      token,
+    if (!user) throw new Error("User not found");
+    res.clearCookie("refreshToken", { httpOnly: true });
+    res.json({ msg: "Success logout" });
+    return;
+  } catch (error) {
+    res.json(error.message);
+  }
+};
+
+exports.signup = async (req, res) => {
+  try {
+    const userInput = req.body;
+    const signup = await signupService(userInput);
+    const { status, msg } = signup;
+    res
+      .json({
+        status,
+        msg,
+      })
+      .status(status);
+  } catch (error) {
+    res.status(401).json({
+      msg: error.message,
+    });
+  }
+};
+
+exports.otp = async (req, res) => {
+  try {
+    const userInput = req.body;
+    const { status, msg } = await generateOtpAndSendEmailService(userInput);
+    res.status(status).json({
+      status,
+      msg,
     });
   } catch (error) {
     res.status(401).json({
-      status: "FAILED",
-      message: error.message,
+      msg: error.message,
     });
   }
-});
-
-router.post("/signup", [body("email").trim().isEmail()], async (req, res) => {
+};
+exports.verifyOtp = async (req, res) => {
   try {
-    const errors = validationResult(req);
     const userInput = req.body;
-    const { status, message } = await authSignupService(errors, userInput);
-    res.status(status).send({
-      message,
+    const { status, msg, accessToken } = await verifyOtpService(userInput);
+    res.status(status).json({
+      status,
+      msg,
+      token: accessToken,
     });
   } catch (error) {
-    res.status(401).send({
-      message: error.message,
+    res.status(401).json({
+      msg: error.message,
     });
   }
-});
+};
 
-router.post(
-  "/verify-account",
-  [body("email").trim().isEmail()],
-  async (req, res) => {
-    try {
-      const errors = validationResult(req);
-      const userInput = req.body;
-      const { status, message, token, ...data } = await verifyAccountService(
-        errors,
-        userInput
-      );
-      res.status(status).send({
-        message,
-        token,
-        ...data,
-      });
-    } catch (error) {
-      res.send({
-        message: error.message,
-      });
-    }
-  }
-);
-
-router.put(
-  "/forgot-password",
-  [body("email").trim().isEmail()],
-  async (req, res) => {
-    const errors = validationResult(req);
-    const userInput = req.body;
-    try {
-      const { status, message } = await forgotPasswordService(
-        errors,
-        userInput
-      );
-      res.status(status).send({ message });
-    } catch (error) {
-      console.error(error.message);
-    }
-  }
-);
-
-router.put("/verify-code", async (req, res) => {
+exports.resetPassword = async (req, res) => {
+  const userInput = req.body;
   try {
-    const { email, code } = req.body;
-    const verifyCode = await verifyCodeService(email, code);
-    if (verifyCode) {
-      res.status(200).send({ message: "Verification code successfully!." });
-    }
+    const { status, msg } = await resetPasswordService(userInput);
+    res.status(status).send({ msg });
   } catch (error) {
-    res.status(401).send();
+    res.json({ msg: error.message });
   }
-});
-
-router.put(
-  "/reset-password",
-  [body("email").trim().isEmail()],
-  async (req, res) => {
-    const errors = validationResult(req);
-    const userInput = req.body;
-    try {
-      const { status, message } = await resetPasswordService(errors, userInput);
-      res.status(status).send({ message });
-    } catch (error) {
-      console.error(error.message);
-    }
-  }
-);
-
-module.exports = router;
+};

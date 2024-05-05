@@ -1,6 +1,6 @@
 const nodemailer = require("nodemailer");
 
-async function mail(email, verificationCode) {
+async function mail(email, message) {
   const port = 587;
   const host = process.env.HOST;
   const YOUR_LOGIN = process.env.YOUR_LOGIN;
@@ -26,7 +26,7 @@ async function mail(email, verificationCode) {
         address: email,
       },
       subject: "Verifikasi email",
-      text: `Kode verifikasi anda ${verificationCode}`,
+      text: message,
     });
   } catch (error) {
     throw new Error(error);
