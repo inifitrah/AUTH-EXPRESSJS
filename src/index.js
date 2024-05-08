@@ -5,12 +5,13 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const Otp = require("./models/otp.model");
 const User = require("./models/user.model");
-//cors
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 
 //.env
 require("dotenv").config();
 const port = process.env.PORT;
+
+//cors
+app.use(cors({ origin: process.env.URL_CORS_ORIGIN, credentials: true }));
 
 //middleware
 app.use(express.json());
